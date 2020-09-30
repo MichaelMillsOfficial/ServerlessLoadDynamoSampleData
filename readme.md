@@ -17,3 +17,10 @@ The [data set contained](https://ssd-api.jpl.nasa.gov/doc/cad.html) houses the f
 10. t_sigma_f - 3-sigma uncertainty in the time of close-approach (formatted in days, hours, and minutes; days are not included if zero; example “13:02” is 13 hours 2 minutes; example “2_09:08” is 2 days 9 hours 8 minutes)
 11. body - name of the close-approach body (e.g., Earth)
 12. h - absolute magnitude H (mag)
+
+# How it works
+Using the serverless framework, we create a CloudFormation stack consisting of an S3 Bucket, a Dynamo table, and a Serverless Function to be executed during the deploy. The serverless function execution will fetch the sample data using a default URL, and put it into our S3 Bucket as a .json file. The Dynamo table is created with a composite HASH and RANGE key, as the query I'm using by default returns NEO's with the same designation, but approaching other bodies (Earth, Moon, etc.) which allows us to load all the data with no issue.
+
+Once we have the stack created, we then create an IAM role and a Lambda function. The IAM role will grant the Lambda function access to our S3 Bucket contents and CRUD operations for our Dynamo table. The function in question will, when executed, load the sample data json file and parse it; storing each NEO to our Dynamo table.
+
+Once the stack and function are created (specifically, after stack outputs are displayed, in order to ensure we execute after everything has been created), a local serverless plugin will run and execute the function to load our table.

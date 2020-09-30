@@ -151,6 +151,8 @@ resources:
         Policies:
           - AWSLambdaBasicExecutionRole
           - AmazonS3FullAccess
+        # I don't like the idea of an inline function as it would be more difficult to maintain.
+        # Ideally this code would be something we would want to have housed in an S3 bucket
         InlineCode: |
           const aws = require('aws-sdk');
           const https = require('https');
@@ -172,9 +174,8 @@ resources:
                   res.on('data', function(chunk) {
                       data.push(chunk);
                   }).on('end', function() {
-                      //at this point data is an array of Buffers
-                      //so Buffer.concat() can make us a new Buffer
-                      //of all of them together
+                      // Since data is now an array of Buffers,
+                      // we can use concat to squish them all together
                       var buffer = Buffer.concat(data);
                       
                       let s3 = new aws.S3();

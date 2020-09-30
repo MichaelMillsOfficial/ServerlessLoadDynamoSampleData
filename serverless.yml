@@ -28,43 +28,6 @@ provider:
 #  stage: dev
 #  region: us-east-1
 
-# ShinyFunctionRole:
-#       Type: AWS::IAM::Role
-#       Properties:
-#         AssumeRolePolicyDocument:
-#           Version: "2012-10-17"
-#           Statement:
-#             - Effect: Allow
-#               Principal:
-#                 Service: lambda.amazonaws.com
-#               Action: "sts:AssumeRole"
-#         Policies: 
-#           - PolicyName: "dynamo-readwrite"
-#             PolicyDocument: 
-#               Version: "2012-10-17"
-#               Statement: 
-#                 - Effect: Allow
-#                   Action: 
-#                     - dynamodb:List*
-#                     - dynamodb:Describe*
-#                     - dynamodb:Get*
-#                     - dynamodb:PutItem
-#                     - dynamodb:UpdateItem
-#                   Resource: !GetAtt NEOTable.Arn
-#           - PolicyName: "s3-readonly"
-#             PolicyDocument:
-#               Version: "2012-10-17"
-#               Statement:
-#                   - Action: 
-#                       - s3:GetObject
-#                     Effect: "Allow"
-#                     Resource: 
-#                       - !GetAtt NEOJSONBucket.Arn
-#                       - !Join 
-#                         - ''
-#                         - -  !GetAtt NEOJSONBucket.Arn
-#                           - '/*'
-
 # you can add statements to the Lambda function's IAM Role here
   iamRoleStatements:
     - Effect: Allow
@@ -101,8 +64,8 @@ plugins:
     - invoke-lambda-dataload
 
 functions:
-  myShinyNewFunction:
-    handler: ./lambda/myShinyNewFunction/index.handler
+  loadSampleDataToDynamo:
+    handler: ./lambda/loadSampleDataToDynamo/index.handler
 #    The following are a few example events you can configure
 #    NOTE: Please make sure to change your handler code to work with those events
 #    Check the event documentation for details
@@ -145,16 +108,27 @@ functions:
 
 # you can add CloudFormation resource templates here
 resources:
+  Transform: 
+    - AWS::Serverless-2016-10-31
+  Parameters: 
+    url:
+      Type: String
+      Description: Link to REST service containing data
+      Default: https://ssd-api.jpl.nasa.gov/cad.api?body=ALL
+    sampleDataFileName:
+      Type: String
+      Description: File name to store the sample data as
+      Default: sampleData.json
   Resources:
     NEOJSONBucket:
       Type: AWS::S3::Bucket
       Properties:
-        BucketName: near-earth-asteroids-stage
+        BucketName: near-earth-asteroids-${opt:stage, dev}
     NEOTable:
       Type: AWS::DynamoDB::Table
       Properties:
         BillingMode: PROVISIONED
-        TableName: "NearEarthAsteroids"
+        TableName: "NearEarthAsteroids_${opt:stage, dev}"
         ProvisionedThroughput: 
           ReadCapacityUnits: 5
           WriteCapacityUnits: 5
@@ -168,19 +142,67 @@ resources:
             AttributeType: "S"
           - AttributeName: "absolute_magnitude"
             AttributeType: "N"
-    # LambdaFunction:
-    #   Type: AWS::Lambda::Function
-    #   Properties:
-    #     FunctionName: "MyShinyNewFunction"
-    #     Handler: "index.handler"
-    #     Runtime: "nodejs12.x"
-    #     Role: !GetAtt ShinyFunctionRole.Arn
-    #     Code:
-    #       S3Bucket: mills-code-bucket
-    #       S3Key: index.zip
-    #       # S3ObjectVersion: "1"
-    
-  # Outputs:
-  #   LambdaArn:
-  #     Description: "Lambda Function Arn"
-  #     Value: !GetAtt LambdaFunction.Arn
+    DeployToS3:
+      Type: AWS::Serverless::Function
+      Properties:
+        Handler: index.handler
+        Runtime: "nodejs12.x"
+        Timeout: 300
+        Policies:
+          - AWSLambdaBasicExecutionRole
+          - AmazonS3FullAccess
+        InlineCode: |
+          const aws = require('aws-sdk');
+          const https = require('https');
+          const url = require('url');
+
+          exports.handler = function(event, context) {
+              console.log("REQUEST RECEIVED:\n" + JSON.stringify(event));
+
+              var response = require('cfn-response');
+              if(!event.ResourceProperties && !event.ResourceProperties.url && 
+                !event.ResourceProperties.TableName && !event.ResourceProperties.FileName) {
+                  response.send(event, context, response.FAILED, "Missing one or more of url, TableName, or FileName!");
+                  return;
+              }
+              
+              https.get(url.parse(event.ResourceProperties.url), function(res) {
+                  var data = [];
+              
+                  res.on('data', function(chunk) {
+                      data.push(chunk);
+                  }).on('end', function() {
+                      //at this point data is an array of Buffers
+                      //so Buffer.concat() can make us a new Buffer
+                      //of all of them together
+                      var buffer = Buffer.concat(data);
+                      
+                      let s3 = new aws.S3();
+                      var params = {
+                          Body: buffer.toString(),
+                          Bucket: event.ResourceProperties.BucketName,
+                          Key: event.ResourceProperties.FileName
+                      }
+                      try {
+                        s3.putObject(params).promise();
+                        response.send(event, context, response.SUCCESS);
+                      } catch(err) {
+                        response.send(event, context, response.FAILED, err.stack);
+                      }
+                  });
+              });
+          }
+  
+    DeploymentCustomResource:
+      Type: Custom::DeployToS3
+      Properties:
+        ServiceToken: 
+          Fn::GetAtt: 
+            - DeployToS3
+            - Arn
+        url: 
+          Ref: url
+        BucketName: 
+          Ref: NEOJSONBucket
+        FileName: 
+          Ref: sampleDataFileName

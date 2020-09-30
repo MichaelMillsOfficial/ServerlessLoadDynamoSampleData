@@ -1,0 +1,14 @@
+{
+  "name": "invoke-lambda-dataload",
+  "version": "1.0.0",
+  "description": "",
+  "main": "invoke-lambda-dataload.js",
+  "scripts": {
+    "test": "mocha"
+  },
+  "author": "Michael Mills",
+  "license": "ISC",
+  "dependencies": {
+    "aws-sdk": "^2.762.0"
+  }
+}
